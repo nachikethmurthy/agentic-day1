@@ -1,94 +1,162 @@
-import os
+from typing import TypedDict, Annotated
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
+import operator
+
+from langgraph.graph import StateGraph, END
+
+
+class SupportState(TypedDict):
+    """
+    Shared state for the support routing graph.
+
+    This mirrors the Day 2 assignment requirements:
+    - messages: conversation history
+    - should_escalate: whether the issue should be escalated
+    - issue_type: free-form string you can use later
+    - user_tier: "vip" or "standard"
+    """
+
+    messages: Annotated[list[BaseMessage], operator.add]
+    should_escalate: bool
+    issue_type: str
+    user_tier: str
+
+
+def check_user_tier_node(state: SupportState) -> dict:
+    """
+    Decide if user is VIP or standard (mock implementation).
+
+    In a real system you'd look up the user in a database.
+    Here we just inspect the first message content.
+    """
+
+    first_message = state["messages"][0].content.lower() if state["messages"] else ""
+    if "vip" in first_message or "premium" in first_message:
+        tier = "vip"
+    else:
+        tier = "standard"
+
+    print(f"[check_user_tier_node] user_tier = {tier}")
+    return {"user_tier": tier}
+
+
+def vip_agent_node(state: SupportState) -> dict:
+    """
+    VIP path – fast lane / no escalation.
+
+    For now we just set should_escalate = False and leave room
+    to plug in an LLM-based response in later weeks.
+    """
+
+    print("[vip_agent_node] Handling VIP user with fast-lane policy")
+    return {
+        "should_escalate": False,
+    }
+
+
+def standard_agent_node(state: SupportState) -> dict:
+    """
+    Standard path – may escalate.
+
+    For this assignment we simply set should_escalate = True
+    to simulate that standard users may require escalation.
+    """
+
+    print("[standard_agent_node] Handling standard user, marking for escalation")
+    return {
+        "should_escalate": True,
+    }
+
+
+def route_by_tier(state: SupportState) -> str:
+    """
+    Route based on user tier.
+
+    This function is wired into add_conditional_edges and must return
+    either "vip_path" or "standard_path".
+    """
+
+    tier = state.get("user_tier", "").lower()
+    if tier == "vip":
+        print("[route_by_tier] Routing to VIP path")
+        return "vip_path"
+    print("[route_by_tier] Routing to standard path")
+    return "standard_path"
+
+
+def build_graph():
+    workflow = StateGraph(SupportState)
+
+    workflow.add_node("check_tier", check_user_tier_node)
+    workflow.add_node("vip_agent", vip_agent_node)
+    workflow.add_node("standard_agent", standard_agent_node)
+
+    workflow.set_entry_point("check_tier")
+
+    workflow.add_conditional_edges(
+        "check_tier",
+        route_by_tier,
+        {
+            "vip_path": "vip_agent",
+            "standard_path": "standard_agent",
+        },
+    )
+
+    workflow.add_edge("vip_agent", END)
+    workflow.add_edge("standard_agent", END)
+
+    return workflow.compile()
 
 
 def main() -> None:
-    """
-    Day 1: Context Failure → Context Fix
-
-    This script intentionally shows:
-    1) How naïve, stateless LLM calls can lose context.
-    2) How message-based invocation preserves conversation history.
-    """
-
-    # Load environment variables from .env (API keys, etc.)
+    # Load env in case you want to plug in LLMs later
     load_dotenv()
 
-    # You can switch to ChatGoogleGenerativeAI if you prefer, as long as you
-    # keep the same overall behavior.
-    llm = ChatOpenAI(temperature=0.0)
+    graph = build_graph()
 
-    # ---------------------------------------------------------------------
-    # 1) Context break demonstration (naïve string-based invocation)
-    # ---------------------------------------------------------------------
-    print("=== Naive, stateless calls (context can break) ===")
-
-    # Example from the assignment brief.
-    resp1 = llm.invoke(
-        "We are building an AI system for processing medical insurance claims."
+    print("=" * 60)
+    print("VIP test run")
+    print("=" * 60)
+    vip_result = graph.invoke(
+        {
+            "messages": [
+                HumanMessage(content="I'm a VIP customer, please check my order status")
+            ],
+            "should_escalate": False,
+            "issue_type": "",
+            "user_tier": "",
+        }
     )
-    print("resp1:", resp1)
+    print(
+        "VIP result:",
+        "user_tier=",
+        vip_result.get("user_tier"),
+        "should_escalate=",
+        vip_result.get("should_escalate"),
+    )
 
-    resp2 = llm.invoke("What are the main risks in this system?")
-    print("resp2:", resp2)
-
-    # Another classic context-break example: follow-up that relies on pronouns.
-    pm_resp1 = llm.invoke("Who is the current PM of India?")
-    print("pm_resp1:", pm_resp1)
-
-    pm_resp2 = llm.invoke("What is his age?")
-    print("pm_resp2:", pm_resp2)
-
-    # In both of these cases, the model is not guaranteed to remember the
-    # earlier question, because each call is stateless. The second question
-    # may fail or behave inconsistently without conversation history.
-
-    # ---------------------------------------------------------------------
-    # 2) Context fix using Messages API
-    # ---------------------------------------------------------------------
-    print("\n=== Message-based invocation (context preserved) ===")
-
-    messages = [
-        SystemMessage(
-            content=(
-                "You are a senior AI architect reviewing production AI systems. "
-                "Be precise and highlight real-world failure modes."
-            )
-        ),
-        HumanMessage(
-            content=(
-                "We are building an AI system for processing medical insurance claims."
-            )
-        ),
-        HumanMessage(content="What are the main risks in this system?"),
-    ]
-
-    result = llm.invoke(messages)
-    print("messages_result:", result)
+    print("\n" + "=" * 60)
+    print("Standard test run")
+    print("=" * 60)
+    standard_result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="Check my order status")],
+            "should_escalate": False,
+            "issue_type": "",
+            "user_tier": "",
+        }
+    )
+    print(
+        "Standard result:",
+        "user_tier=",
+        standard_result.get("user_tier"),
+        "should_escalate=",
+        standard_result.get("should_escalate"),
+    )
 
 
 if __name__ == "__main__":
     main()
-
-"""
-Reflection:
-
-1. Why did string-based invocation fail?
-   - Each call like llm.invoke("...") is stateless; the model is not guaranteed
-     to remember earlier inputs, so follow‑up questions (e.g. asking for risks
-     or "his age" after "PM of India") may be answered without proper context.
-
-2. Why does message-based invocation work?
-   - By passing a messages list with SystemMessage and HumanMessage entries,
-     we give the model the full conversation history in one call, so it can
-     reason over prior turns and maintain consistent state.
-
-3. What would break in a production AI system if we ignore message history?
-   - User experiences become inconsistent, follow‑ups can be wrong or unsafe,
-     and any downstream automation (approvals, data writes, decisions) built on
-     top of those responses can fail in subtle, high‑impact ways.
-"""
 

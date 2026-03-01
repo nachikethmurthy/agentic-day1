@@ -1,22 +1,26 @@
-# Agentic Day 1 – Context Failure → Context Fix
+# Agentic Day 2 – Routing with LangGraph
 
-This repo is the **starter structure** for the Day 1 assignment of the Agentic AI Enterprise Mastery Bootcamp.
+This repo is the **reference solution** / **starter structure** for the Day 2 assignment of the Agentic AI Enterprise Mastery Bootcamp.
 
-The goal is to **see how naïve, stateless LLM calls can break context**, and how using a **message-based API** fixes that behavior in a way that is suitable for production systems.
+The goal is to build a **minimal LangGraph workflow** that:
+
+- Tracks state in a typed `SupportState`
+- Routes users to different paths based on `user_tier`
+- Makes routing logic explicit and testable
 
 ---
 
 ## Project Structure
 
 ```text
-agentic-day1/
+agentic-day2-routing/
 ├── .gitignore
 ├── requirements.txt
 ├── README.md
 └── app.py
 ```
 
-You should only have **one Python file**, `app.py`.
+You should only have **one Python file**, `app.py`, in your own submission.
 
 ---
 
@@ -35,21 +39,20 @@ source .venv/bin/activate  # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Create a `.env` file in the project root for your API keys, for example:
+3. Create a `.env` file in the project root for your API keys (if you use OpenAI, etc.):
 
 ```bash
 OPENAI_API_KEY="sk-..."
-# or
-GOOGLE_API_KEY="..."
 ```
 
-> **Important:** `.env` is listed in `.gitignore` and **must not be committed**. Never push API keys or secrets to GitHub.
+> **Important:** `.env` is listed in `.gitignore` and **must not be committed**.  
+> Never push API keys or secrets to GitHub.
 
 ---
 
 ## Running the app
 
-Once dependencies are installed and your `.env` is set up, run:
+Once dependencies are installed and your `.env` is set up (if needed), run:
 
 ```bash
 python app.py
@@ -57,12 +60,16 @@ python app.py
 
 The script will:
 
-- Demonstrate a **context break** using naïve, stateless `llm.invoke("...")` calls
-- Then demonstrate a **context fix** using `SystemMessage` and `HumanMessage` in a `messages` list and calling `llm.invoke(messages)`
-- Include a reflection block at the bottom of `app.py` where you explain:
-  - Why string-based invocation can fail
-  - Why message-based invocation works better
-  - What would break in a production AI system if we ignore message history
+- Build a `SupportState` TypedDict with `user_tier` and `should_escalate`
+- Build a `StateGraph` with:
+  - A `check_tier` node to decide VIP vs standard
+  - A `vip_agent` node
+  - A `standard_agent` node
+  - A `route_by_tier` function wired via `add_conditional_edges`
+- Invoke the graph twice:
+  - Once with a VIP-style message
+  - Once with a standard message
+- Print out the resulting `user_tier` and `should_escalate` values so you can see routing behavior
 
 ---
 
@@ -77,5 +84,5 @@ The script will:
 python app.py
 ```
 
-Please read the full assignment brief for detailed requirements and reflection prompts.
+Please read the full Day 2 assignment brief for detailed requirements and grading criteria.
 
